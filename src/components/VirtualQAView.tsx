@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Bot, PhoneCall, ShieldAlert, AlertTriangle, Eye, Mic, PhoneForwarded,
-  Plus, Edit2, Trash2, RefreshCw, Sparkles, Building2
+  Plus, Edit2, Trash2, RefreshCw, Sparkles, Building2, CheckCircle2, Volume2, Send
 } from 'lucide-react';
 import {
   PageContainer, PageHeader, Card,
@@ -33,6 +33,14 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token, user }) => 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingConfig, setEditingConfig] = useState<VirtualQAConfig | null>(null);
+
+  // Demo & Speech Simulation Modal State
+  const [isDemoStarting, setIsDemoStarting] = useState(false);
+  const [isSimModalOpen, setIsSimModalOpen] = useState(false);
+  const [simCall, setSimCall] = useState<QAActiveCall | null>(null);
+  const [simUtterance, setSimUtterance] = useState('chal be hatt chutiye');
+  const [simLoading, setSimLoading] = useState(false);
+  const [simResult, setSimResult] = useState<any | null>(null);
   const [formData, setFormData] = useState({
     tenant_id: '',
     qa_extension_number: '8999',
@@ -218,15 +226,54 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token, user }) => 
     }
   };
 
-  const handleSimulateViolation = async (callUuid: string) => {
-    setActionLoading(`${callUuid}-sim`);
+  const handleStartDemoCall = async () => {
+    setIsDemoStarting(true);
     try {
-      await apiService.simulateQAViolation(token, callUuid);
-      loadData(selectedTenantId);
+      const targetTenantId = selectedTenantId || (tenants.length > 0 ? tenants[0].id : (user?.tenant_id || undefined));
+      const res = await apiService.startQADemoCall(token, {
+        tenant_id: targetTenantId,
+        agent_extension: '1001',
+        customer_extension: '2001',
+      });
+      await loadData(selectedTenantId);
+      setSimCall({
+        call_uuid: res.call_uuid,
+        tenant_id: res.tenant_id,
+        agent_extension: res.agent_extension,
+        customer_extension: res.customer_extension,
+        agent_leg: res.agent_leg,
+        warn_count: res.warn_count,
+        escalated: res.escalated,
+        started_at: res.started_at || Date.now() / 1000,
+      });
+      setSimUtterance('chal be hatt chutiye');
+      setSimResult(null);
+      setIsSimModalOpen(true);
     } catch (err: any) {
-      alert(err.message || 'Simulation failed');
+      alert(err.message || 'Failed to start demo call');
     } finally {
-      setActionLoading(null);
+      setIsDemoStarting(false);
+    }
+  };
+
+  const handleOpenSimModal = (call: QAActiveCall) => {
+    setSimCall(call);
+    setSimUtterance('chal be hatt chutiye');
+    setSimResult(null);
+    setIsSimModalOpen(true);
+  };
+
+  const handleExecuteSimulation = async () => {
+    if (!simCall) return;
+    setSimLoading(true);
+    try {
+      const res = await apiService.simulateQAViolation(token, simCall.call_uuid, simUtterance);
+      setSimResult(res);
+      await loadData(selectedTenantId);
+    } catch (err: any) {
+      alert(err.message || 'Speech evaluation failed');
+    } finally {
+      setSimLoading(false);
     }
   };
 
@@ -261,6 +308,15 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token, user }) => 
                   </Select>
                 </div>
               )}
+              <Button
+                variant="secondary"
+                onClick={handleStartDemoCall}
+                isLoading={isDemoStarting}
+                leftIcon={<Sparkles size={14} className="text-primary" />}
+                title="Launch a simulated agent-customer call to test live AI compliance"
+              >
+                Launch Demo Call
+              </Button>
               <Button
                 variant="secondary"
                 onClick={() => loadData(selectedTenantId)}
@@ -313,7 +369,17 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token, user }) => 
               <div className="text-center py-12 text-text-muted">
                 <Bot size={40} className="mx-auto mb-3 opacity-40" />
                 <p className="text-base font-medium">No calls currently being monitored</p>
-                <p className="text-sm">Initiate an internal or inbound call involving a monitored agent extension to observe real-time tailing.</p>
+                <p className="text-sm mb-4">
+                  Initiate an internal or inbound call involving a monitored agent extension, or launch a demo call to test AI coaching live on the platform.
+                </p>
+                <Button
+                  variant="primary"
+                  onClick={handleStartDemoCall}
+                  isLoading={isDemoStarting}
+                  leftIcon={<Sparkles size={16} />}
+                >
+                  Launch Demo Monitored Call
+                </Button>
               </div>
             ) : (
               <Table>
@@ -387,11 +453,11 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token, user }) => 
                           <Button
                             size="sm"
                             variant="secondary"
-                            onClick={() => handleSimulateViolation(call.call_uuid)}
-                            title="Simulate Violation (Demo Mode)"
-                            leftIcon={<Sparkles size={13} />}
+                            onClick={() => handleOpenSimModal(call)}
+                            title="Test Agent Speech / AI Compliance with Gemini & ElevenLabs"
+                            leftIcon={<Sparkles size={13} className="text-primary" />}
                           >
-                            Simulate
+                            Test Speech
                           </Button>
                         </div>
                       </TableCell>
@@ -666,6 +732,139 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token, user }) => 
               </label>
             </div>
           </form>
+        </Modal>
+
+        {/* Modal: Interactive Speech Test & AI Compliance */}
+        <Modal
+          isOpen={isSimModalOpen}
+          onClose={() => setIsSimModalOpen(false)}
+          title="Test Agent Speech & Real-Time AI Coaching"
+          subtitle={
+            simCall
+              ? `Call UUID: ${simCall.call_uuid.slice(0, 8)}... | Agent: ${simCall.agent_extension} ↔ Customer: ${simCall.customer_extension || '2001'}`
+              : 'Evaluate agent utterances against Gemini LLM and trigger live ElevenLabs whisper audio.'
+          }
+          footer={
+            <div className="flex justify-between w-full items-center">
+              <span className="text-xs text-text-muted">
+                Current Warnings: <span className="font-semibold text-text-primary">{simCall?.warn_count ?? 0}</span>
+                {simCall?.escalated && <span className="ml-1 text-danger font-semibold">(Escalated)</span>}
+              </span>
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={() => setIsSimModalOpen(false)}>Close</Button>
+                <Button
+                  variant="primary"
+                  onClick={handleExecuteSimulation}
+                  isLoading={simLoading}
+                  leftIcon={<Send size={14} />}
+                >
+                  Evaluate with Gemini
+                </Button>
+              </div>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5">
+                Simulated Agent Utterance
+              </label>
+              <textarea
+                className="w-full rounded-md border border-border bg-bg-surface px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                rows={3}
+                value={simUtterance}
+                onChange={(e) => setSimUtterance(e.target.value)}
+                placeholder="Enter what the agent says during the live call..."
+              />
+            </div>
+
+            <div>
+              <span className="text-xs text-text-muted block mb-1.5">Quick Presets:</span>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  className="px-2.5 py-1 text-xs rounded-full border border-border bg-bg-surface hover:bg-bg-surface-hover text-text-secondary transition-colors"
+                  onClick={() => setSimUtterance('chal be hatt chutiye')}
+                >
+                  🤬 "chal be hatt chutiye" (Profanity / Insult)
+                </button>
+                <button
+                  type="button"
+                  className="px-2.5 py-1 text-xs rounded-full border border-border bg-bg-surface hover:bg-bg-surface-hover text-text-secondary transition-colors"
+                  onClick={() => setSimUtterance('Deal with it yourself, I do not care about your problem.')}
+                >
+                  😤 "I do not care about your problem" (Rude)
+                </button>
+                <button
+                  type="button"
+                  className="px-2.5 py-1 text-xs rounded-full border border-border bg-bg-surface hover:bg-bg-surface-hover text-text-secondary transition-colors"
+                  onClick={() => setSimUtterance('I guarantee 100% money back instantly within 5 minutes, no questions asked.')}
+                >
+                  ⚠️ "100% money back guaranteed" (Unauthorized Promise)
+                </button>
+                <button
+                  type="button"
+                  className="px-2.5 py-1 text-xs rounded-full border border-border bg-bg-surface hover:bg-bg-surface-hover text-text-secondary transition-colors"
+                  onClick={() => setSimUtterance('Thank you for calling support! My name is John, how may I assist you today?')}
+                >
+                  ✅ "Thank you for calling support..." (Compliant)
+                </button>
+              </div>
+            </div>
+
+            {simResult && (
+              <div
+                className={`p-4 rounded-lg border text-sm space-y-2.5 ${
+                  simResult.violation
+                    ? 'border-danger/40 bg-danger/5'
+                    : 'border-success/40 bg-success/5'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {simResult.violation ? (
+                      <>
+                        <AlertTriangle size={18} className="text-danger" />
+                        <span className="font-semibold text-danger">Policy Violation Detected</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 size={18} className="text-success" />
+                        <span className="font-semibold text-success">Compliant Utterance</span>
+                      </>
+                    )}
+                  </div>
+                  {simResult.result?.warn_count !== undefined && (
+                    <Badge variant={simResult.result.escalated ? 'danger' : 'warning'}>
+                      {simResult.result.escalated ? 'ESCALATED' : `Warning #${simResult.result.warn_count}`}
+                    </Badge>
+                  )}
+                </div>
+
+                <div>
+                  <span className="text-xs text-text-muted block font-medium">Gemini Evaluation:</span>
+                  <p className="text-text-primary text-xs mt-0.5">{simResult.reason || 'Evaluation completed'}</p>
+                </div>
+
+                {simResult.coaching && (
+                  <div className="p-2.5 rounded bg-bg-surface border border-border text-xs space-y-1">
+                    <div className="flex items-center gap-1.5 text-primary font-medium">
+                      <Volume2 size={14} />
+                      <span>ElevenLabs Whisper Coaching Dispatched to Agent:</span>
+                    </div>
+                    <p className="text-text-primary italic">"{simResult.coaching}"</p>
+                  </div>
+                )}
+
+                {simResult.result?.escalated && (
+                  <div className="p-2 rounded bg-danger/10 border border-danger/30 text-xs text-danger font-medium flex items-center gap-1.5">
+                    <PhoneForwarded size={14} />
+                    <span>Supervisor extension {simResult.result?.action_data?.supervisor_ext || '9001'} notified for immediate call barge.</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </Modal>
       </Stack>
     </PageContainer>

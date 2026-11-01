@@ -1196,10 +1196,24 @@ export const apiService = {
     return res.json();
   },
 
-  async simulateQAViolation(token: string, callUuid: string) {
+  async startQADemoCall(token: string, payload?: { tenant_id?: string; agent_extension?: string; customer_extension?: string }) {
+    const res = await fetch(`${API_BASE_URL}/api/v1/qa/calls/start-demo`, {
+      method: 'POST',
+      headers: getHeaders(token),
+      body: JSON.stringify(payload || {}),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to start demo call');
+    }
+    return res.json();
+  },
+
+  async simulateQAViolation(token: string, callUuid: string, utterance?: string) {
     const res = await fetch(`${API_BASE_URL}/api/v1/qa/calls/${callUuid}/simulate-violation`, {
       method: 'POST',
       headers: getHeaders(token),
+      body: JSON.stringify({ utterance }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
