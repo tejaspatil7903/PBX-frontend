@@ -2,7 +2,7 @@ import React from 'react';
 import {
   LayoutDashboard, Building2, Phone, Terminal, ShieldCheck, Users,
   PhoneCall, PhoneForwarded, Voicemail, Hash, BarChart2, Music,
-  HelpCircle, ArrowLeftRight, UserCog, Layers, List, Users2, Ban, Contact, Clock, Mail, GitBranch
+  HelpCircle, ArrowLeftRight, UserCog, Layers, List, Users2, Ban, Contact, Clock, Mail, GitBranch, Bot
 } from 'lucide-react';
 import type { User as UserType } from '../types';
 import { isModuleAllowed } from '../types';
@@ -65,6 +65,12 @@ const navGroups: NavGroup[] = [
       { id: 'call-block',       label: 'Call Block',       icon: Ban,             roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'SUB_ADMIN'] },
       { id: 'business-hours',   label: 'Business Hours',   icon: Clock,           roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'SUB_ADMIN'] },
       { id: 'contacts',         label: 'Contacts',         icon: Contact,         roles: ['TENANT_ADMIN', 'SUB_ADMIN', 'SUPERVISOR', 'AGENT'] },
+    ],
+  },
+  {
+    label: 'Quality & Monitoring',
+    items: [
+      { id: 'virtual-qa',  label: 'Virtual QA',        icon: Bot,             roles: ['SUPER_ADMIN', 'TENANT_ADMIN', 'SUB_ADMIN', 'SUPERVISOR'] },
     ],
   },
   {

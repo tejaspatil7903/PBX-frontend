@@ -169,3 +169,61 @@ export interface SmtpTestPayload {
   use_tls?: boolean;
   tenant_id?: string;
 }
+
+export interface VirtualQAConfig {
+  id: string;
+  tenant_id: string;
+  qa_extension_id: string;
+  qa_extension_number?: string;
+  qa_extension_name?: string;
+  max_warn_retries: number;
+  cooldown_seconds: number;
+  supervisor_extension?: string;
+  monitored_agents: string[];
+  monitored_callers: string[];
+  policy_prompt?: string;
+  banned_keywords: string[];
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QAActiveCall {
+  call_uuid: string;
+  tenant_id: string;
+  agent_extension: string;
+  customer_extension: string;
+  agent_leg: string;
+  warn_count: number;
+  escalated: boolean;
+  started_at: number;
+}
+
+export interface QAEvent {
+  id: string;
+  tenant_id: string;
+  call_uuid: string;
+  event_type: 'warning' | 'escalation' | 'intervention';
+  agent_extension?: string;
+  warn_count?: number;
+  transcript?: string;
+  coaching_message?: string;
+  audio_file_path?: string;
+  details?: any;
+  created_at: string;
+}
+
+export interface QAEscalationPayload {
+  event_type: 'qa.escalation';
+  call_uuid: string;
+  tenant_id: string;
+  agent_extension: string;
+  customer_extension: string;
+  supervisor_extension?: string;
+  warn_count: number;
+  max_warn_retries: number;
+  reason?: string;
+  coaching?: string;
+  transcript?: string;
+  timestamp: number | string;
+}

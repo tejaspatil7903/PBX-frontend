@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { apiService } from '../services/api';
-import type { SystemStatus, User } from '../types';
+import type { SystemStatus, User, QAEscalationPayload } from '../types';
 import {
   Building2,
   Phone,
@@ -15,12 +15,16 @@ import {
   HardDrive,
   TrendingUp,
   PhoneIncoming,
-  PhoneOutgoing
+  PhoneOutgoing,
+  ShieldAlert,
+  Eye,
+  Mic,
+  PhoneForwarded
 } from 'lucide-react';
 
 import { PageContainer, PageHeader } from './layout/PageContainer';
 import { Stack, Grid, Inline } from './layout/Stack';
-import { Card, StatCard, Heading, Text, Badge, IconTile, ProgressBar } from './ui';
+import { Card, StatCard, Heading, Text, Badge, IconTile, ProgressBar, Button } from './ui';
 
 interface DashboardMetrics {
   system_utilization: {
@@ -65,6 +69,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ token, user, setAc
     redis: 'disconnected'
   });
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [activeEscalations, setActiveEscalations] = useState<QAEscalationPayload[]>([]);
+
+  // Hydrate active escalations on mount
+  useEffect(() => {
+    if (token) {
+      apiService.getQAActiveCalls(token).then((calls) => {
+        const escalated = calls.filter((c: any) => c.escalated).map((c: any) => ({
+          event_type: 'qa.escalation' as const,
+          call_uuid: c.call_uuid,
+          tenant_id: c.tenant_id,
+          agent_extension: c.agent_extension,
+          customer_extension: c.customer_extension,
+          warn_count: c.warn_count,
+          max_warn_retries: 3,
+          timestamp: c.started_at
+        }));
+        setActiveEscalations(escalated);
+      }).catch(() => {});
+    }
+  }, [token]);
+
+  const handleIntervene = async (callUuid: string, mode: 'listen' | 'whisper' | 'barge') => {
+    try {
+      await apiService.interveneQACall(token, callUuid, mode);
+      alert(`Intervention (${mode.toUpperCase()}) initiated to supervisor!`);
+    } catch (err: any) {
+      alert(err.message || 'Intervention failed');
+    }
+  };
+
+  const dismissEscalation = (callUuid: string) => {
+    setActiveEscalations((prev) => prev.filter((e) => e.call_uuid !== callUuid));
+  };
 
   useEffect(() => {
     const fetchStatus = async () => {
@@ -103,6 +140,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ token, user, setAc
             const payload = JSON.parse(event.data);
             if (payload.event === 'cdr.created' || payload.type === 'cdr.created') {
               fetchMetrics();
+            } else if (payload.event_type === 'qa.escalation' || payload.event === 'qa.escalation') {
+              setActiveEscalations((prev) => {
+                if (prev.some((e) => e.call_uuid === payload.call_uuid)) return prev;
+                return [payload, ...prev];
+              });
+            } else if (payload.event_type === 'qa.call_ended' || payload.event === 'call.ended') {
+              setActiveEscalations((prev) => prev.filter((e) => e.call_uuid !== payload.call_uuid));
             }
           } catch {}
         };
@@ -139,6 +183,69 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ token, user, setAc
             </Badge>
           }
         />
+
+        {/* ── SUPERVISOR ESCALATION BANNER ────────────────────────────────────────── */}
+        {activeEscalations.length > 0 && (
+          <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-5 shadow-xl backdrop-blur-md space-y-4">
+            {activeEscalations.map((esc) => (
+              <div key={esc.call_uuid} className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="p-2.5 rounded-full bg-red-500/20 text-red-500 animate-pulse">
+                    <ShieldAlert size={26} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-red-500 uppercase tracking-wider text-xs">Live QA Escalation</span>
+                      <span className="text-xs text-text-muted font-mono">{esc.call_uuid.slice(0, 8)}...</span>
+                    </div>
+                    <p className="font-semibold text-text-primary mt-1 text-sm md:text-base">
+                      Agent <span className="text-red-400 font-bold">{esc.agent_extension}</span> exceeded max warnings ({esc.warn_count}/{esc.max_warn_retries}) on call with Customer {esc.customer_extension}!
+                    </p>
+                    {esc.reason && <p className="text-xs text-text-secondary mt-0.5 font-medium">{esc.reason}</p>}
+                    {esc.coaching && <p className="text-xs text-text-muted italic mt-0.5">"{esc.coaching}"</p>}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handleIntervene(esc.call_uuid, 'listen')}
+                    title="Listen (*880<agent>)"
+                    leftIcon={<Eye size={14} />}
+                  >
+                    Listen (*880)
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handleIntervene(esc.call_uuid, 'whisper')}
+                    title="Whisper (*881<agent>)"
+                    leftIcon={<Mic size={14} />}
+                  >
+                    Whisper (*881)
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={() => handleIntervene(esc.call_uuid, 'barge')}
+                    title="Barge (*883<agent>)"
+                    leftIcon={<PhoneForwarded size={14} />}
+                  >
+                    Barge (*883)
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => dismissEscalation(esc.call_uuid)}
+                  >
+                    Acknowledge
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* ── TOP STAT CARDS ────────────────────────────────────────────────────── */}
         <Grid cols={4} gap="6">

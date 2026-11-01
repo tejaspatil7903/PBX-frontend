@@ -1129,5 +1129,95 @@ export const apiService = {
     });
     return res.json();
   },
+
+  // Virtual QA & Monitoring
+  async getQAConfigs(token: string) {
+    const res = await fetch(`${API_BASE_URL}/api/v1/qa/configs`, {
+      headers: getHeaders(token),
+    });
+    if (!res.ok) throw new Error('Failed to fetch Virtual QA configs');
+    return res.json();
+  },
+
+  async createQAConfig(token: string, payload: any) {
+    const res = await fetch(`${API_BASE_URL}/api/v1/qa/configs`, {
+      method: 'POST',
+      headers: getHeaders(token),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to create Virtual QA config');
+    }
+    return res.json();
+  },
+
+  async updateQAConfig(token: string, id: string, payload: any) {
+    const res = await fetch(`${API_BASE_URL}/api/v1/qa/configs/${id}`, {
+      method: 'PUT',
+      headers: getHeaders(token),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to update Virtual QA config');
+    }
+    return res.json();
+  },
+
+  async deleteQAConfig(token: string, id: string) {
+    const res = await fetch(`${API_BASE_URL}/api/v1/qa/configs/${id}`, {
+      method: 'DELETE',
+      headers: getHeaders(token),
+    });
+    if (!res.ok) throw new Error('Failed to delete Virtual QA config');
+    return res.json();
+  },
+
+  async getQAActiveCalls(token: string) {
+    const res = await fetch(`${API_BASE_URL}/api/v1/qa/active-calls`, {
+      headers: getHeaders(token),
+    });
+    if (!res.ok) throw new Error('Failed to fetch active monitored calls');
+    return res.json();
+  },
+
+  async interveneQACall(token: string, callUuid: string, mode: 'listen' | 'whisper' | 'barge' = 'whisper') {
+    const res = await fetch(`${API_BASE_URL}/api/v1/qa/calls/${callUuid}/intervene?mode=${mode}`, {
+      method: 'POST',
+      headers: getHeaders(token),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to initiate intervention');
+    }
+    return res.json();
+  },
+
+  async simulateQAViolation(token: string, callUuid: string) {
+    const res = await fetch(`${API_BASE_URL}/api/v1/qa/calls/${callUuid}/simulate-violation`, {
+      method: 'POST',
+      headers: getHeaders(token),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to simulate QA violation');
+    }
+    return res.json();
+  },
+
+  async getQAEvents(token: string, params?: { call_uuid?: string; event_type?: string; limit?: number; offset?: number }) {
+    const query = new URLSearchParams();
+    if (params?.call_uuid) query.append('call_uuid', params.call_uuid);
+    if (params?.event_type) query.append('event_type', params.event_type);
+    if (params?.limit) query.append('limit', String(params.limit));
+    if (params?.offset) query.append('offset', String(params.offset));
+
+    const res = await fetch(`${API_BASE_URL}/api/v1/qa/events?${query.toString()}`, {
+      headers: getHeaders(token),
+    });
+    if (!res.ok) throw new Error('Failed to fetch QA events');
+    return res.json();
+  },
 };
 
