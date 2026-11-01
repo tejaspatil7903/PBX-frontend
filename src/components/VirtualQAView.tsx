@@ -1,22 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import {
   Bot, PhoneCall, ShieldAlert, AlertTriangle, Eye, Mic, PhoneForwarded,
-  Plus, Edit2, Trash2, RefreshCw, Sparkles
+  Plus, Edit2, Trash2, RefreshCw, Sparkles, Building2
 } from 'lucide-react';
 import {
   PageContainer, PageHeader, Card,
   Button, Badge, Modal, Input, FormField, Stack, Grid, Table, TableHeader,
-  TableBody, TableRow, TableCell
+  TableBody, TableRow, TableCell, Select
 } from './ui';
 import { apiService } from '../services/api';
-import type { User, VirtualQAConfig, QAActiveCall, QAEvent } from '../types';
+import type { User, Tenant, VirtualQAConfig, QAActiveCall, QAEvent } from '../types';
 
 interface VirtualQAViewProps {
   token: string;
   user: User | null;
 }
 
-export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
+export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token, user }) => {
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'SUPERADMIN';
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState<string>(
+    isSuperAdmin ? '' : (user?.tenant_id || '')
+  );
+
   const [activeSubTab, setActiveSubTab] = useState<'live' | 'configs' | 'audit'>('live');
   const [configs, setConfigs] = useState<VirtualQAConfig[]>([]);
   const [activeCalls, setActiveCalls] = useState<QAActiveCall[]>([]);
@@ -28,6 +34,7 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingConfig, setEditingConfig] = useState<VirtualQAConfig | null>(null);
   const [formData, setFormData] = useState({
+    tenant_id: '',
     qa_extension_number: '8999',
     max_warn_retries: 3,
     cooldown_seconds: 10,
@@ -39,14 +46,27 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
     enabled: true,
   });
 
+  // Load Tenants for Superadmin
+  useEffect(() => {
+    if (isSuperAdmin && token) {
+      apiService.getTenants(token)
+        .then((tnts) => {
+          setTenants(tnts || []);
+        })
+        .catch((err) => console.error('Failed to load tenants for QA:', err));
+    }
+  }, [isSuperAdmin, token]);
+
   // Fetch Data
-  const loadData = async () => {
+  const loadData = async (tenantIdToQuery?: string) => {
     setLoading(true);
     try {
+      const activeTenant = tenantIdToQuery !== undefined ? tenantIdToQuery : selectedTenantId;
+      const tid = activeTenant || undefined;
       const [cfgs, calls, evts] = await Promise.all([
-        apiService.getQAConfigs(token).catch(() => []),
-        apiService.getQAActiveCalls(token).catch(() => []),
-        apiService.getQAEvents(token, { limit: 50 }).catch(() => [])
+        apiService.getQAConfigs(token, tid).catch(() => []),
+        apiService.getQAActiveCalls(token, tid).catch(() => []),
+        apiService.getQAEvents(token, { limit: 50, tenant_id: tid }).catch(() => [])
       ]);
       setConfigs(cfgs || []);
       setActiveCalls(calls || []);
@@ -57,12 +77,18 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
   };
 
   useEffect(() => {
-    loadData();
+    loadData(selectedTenantId);
+  }, [token, selectedTenantId]);
+
+  // Polling for live calls
+  useEffect(() => {
     const interval = setInterval(() => {
-      apiService.getQAActiveCalls(token).then(setActiveCalls).catch(() => {});
+      apiService.getQAActiveCalls(token, selectedTenantId || undefined)
+        .then(setActiveCalls)
+        .catch(() => {});
     }, 4000);
     return () => clearInterval(interval);
-  }, [token]);
+  }, [token, selectedTenantId]);
 
   // WebSocket for Real-Time QA Events
   useEffect(() => {
@@ -75,8 +101,8 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
         try {
           const payload = JSON.parse(msg.data);
           if (payload.event_type === 'qa.warning' || payload.event_type === 'qa.escalation') {
-            apiService.getQAActiveCalls(token).then(setActiveCalls).catch(() => {});
-            apiService.getQAEvents(token, { limit: 50 }).then(setEvents).catch(() => {});
+            apiService.getQAActiveCalls(token, selectedTenantId || undefined).then(setActiveCalls).catch(() => {});
+            apiService.getQAEvents(token, { limit: 50, tenant_id: selectedTenantId || undefined }).then(setEvents).catch(() => {});
           }
         } catch {}
       };
@@ -84,19 +110,21 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
     return () => {
       if (ws) ws.close();
     };
-  }, [token]);
+  }, [token, selectedTenantId]);
 
   // Handlers
   const handleOpenCreate = () => {
     setEditingConfig(null);
+    const defaultTenant = selectedTenantId || (tenants.length > 0 ? tenants[0].id : (user?.tenant_id || ''));
     setFormData({
+      tenant_id: defaultTenant,
       qa_extension_number: '8999',
       max_warn_retries: 3,
       cooldown_seconds: 10,
       supervisor_extension: '9001',
       monitored_agents: '1001, 1002',
       monitored_callers: '*',
-      policy_prompt: 'Agent must be courteous, empathetic, and professional at all times.',
+      policy_prompt: 'Agent must be courteous, empathetic, and professional at all times. Never use profanity, rude tone, or unauthorized guarantees.',
       banned_keywords: 'hell, damn, stupid, scam, shut up',
       enabled: true,
     });
@@ -106,6 +134,7 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
   const handleOpenEdit = (cfg: VirtualQAConfig) => {
     setEditingConfig(cfg);
     setFormData({
+      tenant_id: cfg.tenant_id || '',
       qa_extension_number: cfg.qa_extension_number || '8999',
       max_warn_retries: cfg.max_warn_retries || 3,
       cooldown_seconds: cfg.cooldown_seconds || 10,
@@ -123,7 +152,18 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
     e.preventDefault();
     setActionLoading('save');
     try {
+      const targetTenantId = isSuperAdmin
+        ? (formData.tenant_id || selectedTenantId || (tenants.length > 0 ? tenants[0].id : undefined))
+        : (user?.tenant_id || undefined);
+
+      if (isSuperAdmin && !targetTenantId) {
+        alert('Please select a target tenant for this Virtual QA bot policy.');
+        setActionLoading(null);
+        return;
+      }
+
       const payload = {
+        tenant_id: targetTenantId,
         qa_extension_number: formData.qa_extension_number.trim(),
         max_warn_retries: Number(formData.max_warn_retries),
         cooldown_seconds: Number(formData.cooldown_seconds),
@@ -141,7 +181,7 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
         await apiService.createQAConfig(token, payload);
       }
       setIsModalOpen(false);
-      loadData();
+      loadData(selectedTenantId);
     } catch (err: any) {
       alert(err.message || 'Failed to save configuration');
     } finally {
@@ -153,7 +193,7 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
     if (!window.confirm('Are you sure you want to delete this Virtual QA configuration?')) return;
     try {
       await apiService.deleteQAConfig(token, id);
-      loadData();
+      loadData(selectedTenantId);
     } catch (err: any) {
       alert(err.message || 'Failed to delete configuration');
     }
@@ -164,7 +204,7 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
     try {
       const res = await apiService.interveneQACall(token, callUuid, mode);
       alert(`Intervention (${mode.toUpperCase()}) dispatched to supervisor extension ${res.supervisor_extension || '9001'}!`);
-      loadData();
+      loadData(selectedTenantId);
     } catch (err: any) {
       alert(err.message || `Failed to initiate ${mode} intervention`);
     } finally {
@@ -176,12 +216,17 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
     setActionLoading(`${callUuid}-sim`);
     try {
       await apiService.simulateQAViolation(token, callUuid);
-      loadData();
+      loadData(selectedTenantId);
     } catch (err: any) {
       alert(err.message || 'Simulation failed');
     } finally {
       setActionLoading(null);
     }
+  };
+
+  const getTenantBadgeLabel = (tid: string) => {
+    const found = tenants.find((t) => t.id === tid);
+    return found ? `${found.name} (${found.domain})` : tid.slice(0, 8);
   };
 
   return (
@@ -193,7 +238,28 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
           subtitle="Real-time agent audio tailing, automated AI whispers, and instant supervisor eavesdrop & barge."
           actions={
             <div className="flex items-center gap-3">
-              <Button variant="secondary" onClick={loadData} leftIcon={<RefreshCw size={14} className={loading ? 'animate-spin' : ''} />}>
+              {isSuperAdmin && (
+                <div className="flex items-center gap-2">
+                  <Building2 size={16} className="text-text-muted hidden sm:inline" />
+                  <Select
+                    value={selectedTenantId}
+                    onChange={(e) => setSelectedTenantId(e.target.value)}
+                    className="w-56"
+                  >
+                    <option value="">All Tenants (Global)</option>
+                    {tenants.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.domain})
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
+              <Button
+                variant="secondary"
+                onClick={() => loadData(selectedTenantId)}
+                leftIcon={<RefreshCw size={14} className={loading ? 'animate-spin' : ''} />}
+              >
                 Refresh
               </Button>
               <Button variant="primary" onClick={handleOpenCreate} leftIcon={<Plus size={16} />}>
@@ -248,6 +314,7 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
                 <TableHeader>
                   <TableRow>
                     <TableCell header>Call UUID</TableCell>
+                    {isSuperAdmin && <TableCell header>Tenant</TableCell>}
                     <TableCell header>Agent Ext</TableCell>
                     <TableCell header>Customer Ext</TableCell>
                     <TableCell header>Agent Channel Leg</TableCell>
@@ -259,6 +326,13 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
                   {activeCalls.map((call) => (
                     <TableRow key={call.call_uuid}>
                       <TableCell className="font-mono text-xs">{call.call_uuid.slice(0, 8)}...</TableCell>
+                      {isSuperAdmin && (
+                        <TableCell>
+                          <Badge variant="neutral">
+                            {getTenantBadgeLabel(call.tenant_id)}
+                          </Badge>
+                        </TableCell>
+                      )}
                       <TableCell className="font-semibold text-primary">{call.agent_extension}</TableCell>
                       <TableCell>{call.customer_extension || 'N/A'}</TableCell>
                       <TableCell>
@@ -331,7 +405,18 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
                 key={cfg.id}
                 title={`Bot Ext: ${cfg.qa_extension_number || 'Virtual'}`}
                 subtitle={`Supervisor: ${cfg.supervisor_extension || '9001'}`}
-                actions={<Badge variant={cfg.enabled ? 'success' : 'neutral'}>{cfg.enabled ? 'Active' : 'Disabled'}</Badge>}
+                actions={
+                  <div className="flex items-center gap-1.5">
+                    {cfg.tenant_name && (
+                      <Badge variant="neutral" title={`Domain: ${cfg.tenant_domain || ''}`}>
+                        {cfg.tenant_name}
+                      </Badge>
+                    )}
+                    <Badge variant={cfg.enabled ? 'success' : 'neutral'}>
+                      {cfg.enabled ? 'Active' : 'Disabled'}
+                    </Badge>
+                  </div>
+                }
               >
                 <Stack gap="3" className="text-sm">
                   <div>
@@ -397,6 +482,7 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
                 <TableHeader>
                   <TableRow>
                     <TableCell header>Time</TableCell>
+                    {isSuperAdmin && <TableCell header>Tenant</TableCell>}
                     <TableCell header>Type</TableCell>
                     <TableCell header>Agent Ext</TableCell>
                     <TableCell header>Warning Count</TableCell>
@@ -407,6 +493,13 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
                   {events.map((ev) => (
                     <TableRow key={ev.id}>
                       <TableCell className="text-xs text-text-muted">{new Date(ev.created_at).toLocaleTimeString()}</TableCell>
+                      {isSuperAdmin && (
+                        <TableCell>
+                          <Badge variant="neutral">
+                            {getTenantBadgeLabel(ev.tenant_id)}
+                          </Badge>
+                        </TableCell>
+                      )}
                       <TableCell>
                         <Badge
                           variant={
@@ -452,8 +545,44 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token }) => {
           }
         >
           <form onSubmit={handleSaveConfig} className="space-y-4">
+            {isSuperAdmin && (
+              <FormField
+                label="Assign to Tenant"
+                required
+                hint={
+                  editingConfig
+                    ? 'Tenant organization cannot be modified after policy creation'
+                    : 'Select which tenant organization this QA Bot policy is provisioned for'
+                }
+              >
+                {editingConfig ? (
+                  <div className="px-3 py-2 bg-bg-surface-hover rounded-md border border-border text-sm font-medium flex items-center justify-between">
+                    <span>
+                      {editingConfig.tenant_name
+                        ? `${editingConfig.tenant_name} (${editingConfig.tenant_domain})`
+                        : getTenantBadgeLabel(editingConfig.tenant_id)}
+                    </span>
+                    <Badge variant="neutral">Assigned</Badge>
+                  </div>
+                ) : (
+                  <Select
+                    value={formData.tenant_id}
+                    onChange={(e) => setFormData({ ...formData, tenant_id: e.target.value })}
+                    required
+                  >
+                    <option value="" disabled>-- Select Target Tenant --</option>
+                    {tenants.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.domain})
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </FormField>
+            )}
+
             <Grid cols={2} gap="4">
-              <FormField label="Virtual QA Extension Number" required hint="Converted to is_virtual=true">
+              <FormField label="Virtual QA Extension Number" required hint="Converted to headless virtual extension">
                 <Input
                   value={formData.qa_extension_number}
                   onChange={(e) => setFormData({ ...formData, qa_extension_number: e.target.value })}

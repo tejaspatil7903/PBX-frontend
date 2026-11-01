@@ -173,6 +173,8 @@ export interface SmtpTestPayload {
 export interface VirtualQAConfig {
   id: string;
   tenant_id: string;
+  tenant_name?: string;
+  tenant_domain?: string;
   qa_extension_id: string;
   qa_extension_number?: string;
   qa_extension_name?: string;

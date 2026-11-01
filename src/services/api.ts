@@ -1131,8 +1131,9 @@ export const apiService = {
   },
 
   // Virtual QA & Monitoring
-  async getQAConfigs(token: string) {
-    const res = await fetch(`${API_BASE_URL}/api/v1/qa/configs`, {
+  async getQAConfigs(token: string, tenantId?: string) {
+    const query = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
+    const res = await fetch(`${API_BASE_URL}/api/v1/qa/configs${query}`, {
       headers: getHeaders(token),
     });
     if (!res.ok) throw new Error('Failed to fetch Virtual QA configs');
@@ -1174,8 +1175,9 @@ export const apiService = {
     return res.json();
   },
 
-  async getQAActiveCalls(token: string) {
-    const res = await fetch(`${API_BASE_URL}/api/v1/qa/active-calls`, {
+  async getQAActiveCalls(token: string, tenantId?: string) {
+    const query = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
+    const res = await fetch(`${API_BASE_URL}/api/v1/qa/active-calls${query}`, {
       headers: getHeaders(token),
     });
     if (!res.ok) throw new Error('Failed to fetch active monitored calls');
@@ -1206,10 +1208,11 @@ export const apiService = {
     return res.json();
   },
 
-  async getQAEvents(token: string, params?: { call_uuid?: string; event_type?: string; limit?: number; offset?: number }) {
+  async getQAEvents(token: string, params?: { call_uuid?: string; event_type?: string; tenant_id?: string; limit?: number; offset?: number }) {
     const query = new URLSearchParams();
     if (params?.call_uuid) query.append('call_uuid', params.call_uuid);
     if (params?.event_type) query.append('event_type', params.event_type);
+    if (params?.tenant_id) query.append('tenant_id', params.tenant_id);
     if (params?.limit) query.append('limit', String(params.limit));
     if (params?.offset) query.append('offset', String(params.offset));
 
