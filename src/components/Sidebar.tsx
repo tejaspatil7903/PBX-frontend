@@ -113,7 +113,7 @@ function isItemVisible(item: NavItem, user: UserType | null, groupLabel?: string
       'tenant-users', 'extensions', 'tenant-dids', 'tenant-trunks', 'call-routing',
       'queues', 'hunt-groups', 'ivr', 'voicemail', 'call-forwarding',
       'audio-prompts', 'conferences', 'call-block', 'business-hours', 'contacts',
-      'email-settings', 'reports', 'help'
+      'email-settings', 'virtual-qa', 'reports', 'help'
     ].includes(item.id);
   }
 

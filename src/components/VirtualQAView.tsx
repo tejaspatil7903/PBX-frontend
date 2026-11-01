@@ -57,6 +57,12 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token, user }) => 
     }
   }, [isSuperAdmin, token]);
 
+  useEffect(() => {
+    if (!isSuperAdmin && user?.tenant_id && selectedTenantId !== user.tenant_id) {
+      setSelectedTenantId(user.tenant_id);
+    }
+  }, [isSuperAdmin, user?.tenant_id]);
+
   // Fetch Data
   const loadData = async (tenantIdToQuery?: string) => {
     setLoading(true);

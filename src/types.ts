@@ -56,6 +56,7 @@ export const MODULE_ALIASES: Record<string, string[]> = {
   'tenant-dids': ['tenant-dids', 'dids'],
   'tenant-trunks': ['tenant-trunks', 'trunks'],
   'tenant-users': ['tenant-users', 'users'],
+  'virtual-qa': ['virtual-qa', 'qa', 'virtualqa', 'virtual_qa'],
 };
 
 export function isModuleAllowed(tab: string, allowedModules: string[] = []): boolean {

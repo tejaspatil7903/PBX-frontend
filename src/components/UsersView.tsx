@@ -29,6 +29,7 @@ const AVAILABLE_MODULES = [
   { id: 'business-hours', label: 'Business Hours & Time', desc: 'Schedule-based rules' },
   { id: 'contacts', label: 'Phonebook Contacts', desc: 'Shared contacts directory' },
   { id: 'email-settings', label: 'SMTP & Notifications', desc: 'Email alerts configuration' },
+  { id: 'virtual-qa', label: 'Virtual QA & Coaching', desc: 'Real-time AI monitoring & agent coaching' },
   { id: 'reports', label: 'CDR & Analytics', desc: 'Call detail records & analytics' },
   // Global only modules (Super Admin)
   { id: 'tenants', label: 'Tenants Registry (Global)', desc: 'Platform tenant provisioning', globalOnly: true },
