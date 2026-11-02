@@ -277,9 +277,10 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token, user }) => 
     }
   };
 
-  const getTenantBadgeLabel = (tid: string) => {
+  const getTenantBadgeLabel = (tid?: string | null) => {
+    if (!tid) return 'Global / None';
     const found = tenants.find((t) => t.id === tid);
-    return found ? `${found.name} (${found.domain})` : tid.slice(0, 8);
+    return found ? `${found.name} (${found.domain})` : String(tid).slice(0, 8);
   };
 
   return (
