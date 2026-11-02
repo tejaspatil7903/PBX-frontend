@@ -396,8 +396,8 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token, user }) => 
                 </TableHeader>
                 <TableBody>
                   {activeCalls.map((call) => (
-                    <TableRow key={call.call_uuid}>
-                      <TableCell className="font-mono text-xs">{call.call_uuid.slice(0, 8)}...</TableCell>
+                    <TableRow key={call.call_uuid || Math.random()}>
+                      <TableCell className="font-mono text-xs">{(call.call_uuid || '').slice(0, 8)}...</TableCell>
                       {isSuperAdmin && (
                         <TableCell>
                           <Badge variant="neutral">
@@ -741,7 +741,7 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token, user }) => 
           title="Test Agent Speech & Real-Time AI Coaching"
           subtitle={
             simCall
-              ? `Call UUID: ${simCall.call_uuid.slice(0, 8)}... | Agent: ${simCall.agent_extension} ↔ Customer: ${simCall.customer_extension || '2001'}`
+              ? `Call UUID: ${(simCall.call_uuid || '').slice(0, 8)}... | Agent: ${simCall.agent_extension} ↔ Customer: ${simCall.customer_extension || '2001'}`
               : 'Evaluate agent utterances against Gemini LLM and trigger live ElevenLabs whisper audio.'
           }
           footer={

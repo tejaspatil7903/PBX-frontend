@@ -75,13 +75,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ token, user, setAc
   useEffect(() => {
     if (token) {
       apiService.getQAActiveCalls(token).then((calls) => {
-        const escalated = calls.filter((c: any) => c.escalated).map((c: any) => ({
+        if (!Array.isArray(calls)) return;
+        const escalated = calls.filter((c: any) => c && c.escalated && c.call_uuid).map((c: any) => ({
           event_type: 'qa.escalation' as const,
-          call_uuid: c.call_uuid,
+          call_uuid: String(c.call_uuid),
           tenant_id: c.tenant_id,
-          agent_extension: c.agent_extension,
-          customer_extension: c.customer_extension,
-          warn_count: c.warn_count,
+          agent_extension: c.agent_extension || 'N/A',
+          customer_extension: c.customer_extension || 'N/A',
+          warn_count: c.warn_count || 0,
           max_warn_retries: 3,
           timestamp: c.started_at
         }));
@@ -140,13 +141,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ token, user, setAc
             const payload = JSON.parse(event.data);
             if (payload.event === 'cdr.created' || payload.type === 'cdr.created') {
               fetchMetrics();
-            } else if (payload.event_type === 'qa.escalation' || payload.event === 'qa.escalation') {
+            } else if ((payload.event_type === 'qa.escalation' || payload.event === 'qa.escalation') && payload.call_uuid) {
               setActiveEscalations((prev) => {
                 if (prev.some((e) => e.call_uuid === payload.call_uuid)) return prev;
                 return [payload, ...prev];
               });
             } else if (payload.event_type === 'qa.call_ended' || payload.event === 'call.ended') {
-              setActiveEscalations((prev) => prev.filter((e) => e.call_uuid !== payload.call_uuid));
+              if (payload.call_uuid) {
+                setActiveEscalations((prev) => prev.filter((e) => e.call_uuid !== payload.call_uuid));
+              }
             }
           } catch {}
         };
@@ -185,9 +188,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ token, user, setAc
         />
 
         {/* ── SUPERVISOR ESCALATION BANNER ────────────────────────────────────────── */}
-        {activeEscalations.length > 0 && (
+        {activeEscalations.filter((esc) => esc && esc.call_uuid).length > 0 && (
           <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-5 shadow-xl backdrop-blur-md space-y-4">
-            {activeEscalations.map((esc) => (
+            {activeEscalations.filter((esc) => esc && esc.call_uuid).map((esc) => (
               <div key={esc.call_uuid} className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div className="flex items-start gap-3">
                   <div className="p-2.5 rounded-full bg-red-500/20 text-red-500 animate-pulse">
@@ -196,7 +199,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ token, user, setAc
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-red-500 uppercase tracking-wider text-xs">Live QA Escalation</span>
-                      <span className="text-xs text-text-muted font-mono">{esc.call_uuid.slice(0, 8)}...</span>
+                      <span className="text-xs text-text-muted font-mono">{(esc.call_uuid || '').slice(0, 8)}...</span>
                     </div>
                     <p className="font-semibold text-text-primary mt-1 text-sm md:text-base">
                       Agent <span className="text-red-400 font-bold">{esc.agent_extension}</span> exceeded max warnings ({esc.warn_count}/{esc.max_warn_retries}) on call with Customer {esc.customer_extension}!
