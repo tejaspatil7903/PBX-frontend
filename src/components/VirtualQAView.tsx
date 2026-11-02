@@ -409,7 +409,7 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token, user }) => 
                       <TableCell className="font-semibold text-primary">{call.agent_extension}</TableCell>
                       <TableCell>{call.customer_extension || 'N/A'}</TableCell>
                       <TableCell>
-                        <Badge variant="neutral">{call.agent_leg.toUpperCase()}</Badge>
+                        <Badge variant="neutral">{(call.agent_leg || 'bleg').toUpperCase()}</Badge>
                       </TableCell>
                       <TableCell>
                         {call.escalated ? (
@@ -583,7 +583,7 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token, user }) => 
                               : 'info'
                           }
                         >
-                          {ev.event_type.toUpperCase()}
+                          {(ev.event_type || 'warning').toUpperCase()}
                         </Badge>
                       </TableCell>
                       <TableCell className="font-semibold">{ev.agent_extension || 'N/A'}</TableCell>
