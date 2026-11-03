@@ -8,7 +8,7 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
-    allowedHosts: ['pbx.terrixai.com', '.terrixai.com', 'localhost', '35.244.8.204', true],
+    allowedHosts: ['pbx.terrixai.com', '.terrixai.com', 'localhost', '35.244.8.204'],
     proxy: {
       '/api': {
         target: 'http://localhost:8000',

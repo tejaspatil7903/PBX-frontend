@@ -27,6 +27,7 @@ import { BusinessHoursView } from './components/BusinessHoursView';
 import { EmailSettingsView } from './components/EmailSettingsView';
 import { VirtualQAView } from './components/VirtualQAView';
 import { ToastProvider } from './components/ToastProvider';
+import { QANudgeOverlay } from './components/QANudgeOverlay';
 import { DesignSystemShowcase } from './components/DesignSystemShowcase';
 import { Modal, Button } from './components/ui';
 import { apiService } from './services/api';
@@ -183,6 +184,11 @@ export const App: React.FC = () => {
 
   return (
     <ToastProvider>
+      <QANudgeOverlay
+        token={token}
+        user={user}
+        onNavigateToQA={() => handleSetTab('virtual-qa')}
+      />
       <div id="appScreen" className="block">
         <Sidebar
           collapsed={collapsed}
