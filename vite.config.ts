@@ -6,6 +6,8 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    host: '0.0.0.0',
+    port: 5173,
     allowedHosts: ['pbx.terrixai.com', '.terrixai.com', 'localhost', '35.244.8.204', true],
     proxy: {
       '/api': {
