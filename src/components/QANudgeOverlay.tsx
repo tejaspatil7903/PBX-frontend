@@ -111,6 +111,18 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
               }
             }
 
+            // ── Final Warning & Escalation Filter ─────────────────────────
+            // Early warnings (e.g. 1/3, 2/3) only whisper to the agent softphone.
+            // The tenant admin is only nudged on the FINAL warning or escalation!
+            const isEscalation = payload.event_type === 'qa.escalation';
+            const warnCount = Number(payload.warn_count || 1);
+            const maxRetries = Number(payload.max_warn_retries || 3);
+            const isFinalWarning = warnCount >= maxRetries;
+
+            if (!isFinalWarning && !isEscalation) {
+              return; // Do NOT pop up the nudge for early warnings
+            }
+
             const callUuid = payload.call_uuid || String(Date.now());
             const nudge: QANudgeEvent = {
               id: callUuid, // Keyed by call_uuid so warnings update in-place without stacking duplicate cards!
@@ -120,9 +132,9 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
               agent_extension: payload.agent_extension || 'Unknown',
               customer_extension: payload.customer_extension || 'Customer',
               supervisor_extension: payload.supervisor_extension,
-              warn_count: payload.warn_count || 1,
-              max_warn_retries: payload.max_warn_retries || 3,
-              reason: payload.reason || 'Agent policy violation detected',
+              warn_count: warnCount,
+              max_warn_retries: maxRetries,
+              reason: payload.reason || (isEscalation ? 'Max warnings exceeded' : 'Final compliance warning'),
               coaching: payload.coaching,
               whisper_text: payload.whisper_text,
               transcript: payload.transcript || '',
@@ -130,20 +142,13 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
             };
 
             // Play auditory chime
-            playNudgeChime(nudge.event_type === 'qa.escalation');
+            playNudgeChime(isEscalation);
 
             // Update in-place if card for this call already exists, otherwise add to top (max 2 calls)
             setNudges((prev) => {
               const remaining = prev.filter((n) => n.id !== nudge.id);
               return [nudge, ...remaining].slice(0, 2);
             });
-
-            // Auto-dismiss warnings after 20 seconds (escalations remain until manually dismissed)
-            if (nudge.event_type === 'qa.warning') {
-              setTimeout(() => {
-                setNudges((current) => current.filter((item) => item.id !== nudge.id));
-              }, 20000);
-            }
           } catch (err) {
             console.debug('Failed to parse incoming WebSocket QA event:', err);
           }
@@ -296,11 +301,11 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
                       gap: '5px',
                     }}
                   >
-                    <AlertTriangle size={13} /> COMPLIANCE NUDGE
+                    <AlertTriangle size={13} /> FINAL COMPLIANCE WARNING
                   </span>
                 )}
-                <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 600 }}>
-                  Warning {nudge.warn_count}/{nudge.max_warn_retries}
+                <span style={{ fontSize: '12px', color: '#F59E0B', fontWeight: 700 }}>
+                  Final Warning ({nudge.warn_count}/{nudge.max_warn_retries})
                 </span>
               </div>
 
@@ -390,10 +395,10 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
                   gap: '5px',
                   transition: 'all 0.15s ease',
                 }}
-                title="Eavesdrop on call (*881 + agent extension)"
+                title="Listen silently to call (*880 + agent extension)"
               >
                 {listenStatus === 'success' ? <Check size={13} className="text-emerald-400" /> : <Headphones size={13} className="text-amber-400" />}
-                {listenStatus === 'loading' ? 'Connecting...' : listenStatus === 'success' ? 'Connected' : `Listen (*881${nudge.agent_extension})`}
+                {listenStatus === 'loading' ? 'Connecting...' : listenStatus === 'success' ? 'Connected' : `Listen (*880${nudge.agent_extension})`}
               </button>
 
               <button
@@ -416,7 +421,7 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
                 title="Barge into call (*883 + agent extension)"
               >
                 {bargeStatus === 'success' ? <Check size={13} /> : <Radio size={13} />}
-                {bargeStatus === 'loading' ? 'Barging...' : bargeStatus === 'success' ? 'Barged In' : 'Barge In'}
+                {bargeStatus === 'loading' ? 'Barging...' : bargeStatus === 'success' ? 'Barged In' : `Barge In (*883${nudge.agent_extension})`}
               </button>
 
               {onNavigateToQA && (
