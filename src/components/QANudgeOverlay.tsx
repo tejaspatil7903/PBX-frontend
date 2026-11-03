@@ -1,11 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { AlertTriangle, ShieldAlert, Headphones, Radio, X, ExternalLink, Volume2 } from 'lucide-react';
-import { useToast } from './ToastProvider';
+import { AlertTriangle, ShieldAlert, Headphones, Radio, X, ExternalLink, Volume2, Check } from 'lucide-react';
 import { apiService } from '../services/api';
 import type { User } from '../types';
 
 export interface QANudgeEvent {
-  id: string;
+  id: string; // call_uuid to update in-place per active call
   event_type: 'qa.warning' | 'qa.escalation';
   call_uuid: string;
   tenant_id: string;
@@ -38,31 +37,31 @@ const playNudgeChime = (isEscalation: boolean) => {
       // Urgent, attention-demanding escalation double-tone
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
-      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.15); // A5
-      gain.gain.setValueAtTime(0.25, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.45);
       osc.connect(gain);
       gain.connect(ctx.destination);
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.25, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.45);
       osc.start();
       osc.stop(ctx.currentTime + 0.45);
     } else {
       // Soft, professional two-tone compliance chime
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
-      osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.12); // E5
-      gain.gain.setValueAtTime(0.2, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
       osc.connect(gain);
       gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523.25, ctx.currentTime);
+      osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
       osc.start();
       osc.stop(ctx.currentTime + 0.35);
     }
   } catch {
-    // AudioContext might be silenced if no user interaction yet
+    // AudioContext might be silenced if user hasn't clicked on the document yet
   }
 };
 
@@ -72,8 +71,7 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
   onNavigateToQA
 }) => {
   const [nudges, setNudges] = useState<QANudgeEvent[]>([]);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const { toastWarning, toastError, toastSuccess } = useToast();
+  const [actionStatus, setActionStatus] = useState<{ [key: string]: 'loading' | 'success' | 'error' }>({});
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -109,14 +107,15 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
               const userTid = String(user.tenant_id || '');
               const eventTid = String(payload.tenant_id || '');
               if (!userTid || !eventTid || userTid !== eventTid) {
-                return; // Strictly ignore other tenants!
+                return; // Strictly ignore events from other tenants
               }
             }
 
+            const callUuid = payload.call_uuid || String(Date.now());
             const nudge: QANudgeEvent = {
-              id: `${payload.call_uuid}-${payload.warn_count || Date.now()}`,
+              id: callUuid, // Keyed by call_uuid so warnings update in-place without stacking duplicate cards!
               event_type: payload.event_type,
-              call_uuid: payload.call_uuid,
+              call_uuid: callUuid,
               tenant_id: payload.tenant_id,
               agent_extension: payload.agent_extension || 'Unknown',
               customer_extension: payload.customer_extension || 'Customer',
@@ -133,27 +132,17 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
             // Play auditory chime
             playNudgeChime(nudge.event_type === 'qa.escalation');
 
-            // Add to active nudges queue (limit max 3 simultaneous cards)
-            setNudges((prev) => [nudge, ...prev.filter((n) => n.id !== nudge.id)].slice(0, 3));
+            // Update in-place if card for this call already exists, otherwise add to top (max 2 calls)
+            setNudges((prev) => {
+              const remaining = prev.filter((n) => n.id !== nudge.id);
+              return [nudge, ...remaining].slice(0, 2);
+            });
 
-            // Surface toast summary
-            if (nudge.event_type === 'qa.escalation') {
-              toastError(
-                `🚨 Call Escalated: Agent ${nudge.agent_extension}`,
-                `Max warnings exceeded (${nudge.warn_count}/${nudge.max_warn_retries}). Immediate supervisor action required.`
-              );
-            } else {
-              toastWarning(
-                `⚠️ QA Nudge: Agent ${nudge.agent_extension} (Warning ${nudge.warn_count}/${nudge.max_warn_retries})`,
-                `"${nudge.reason}". AI coaching whisper injected into softphone.`
-              );
-            }
-
-            // Auto-dismiss warnings after 18 seconds (escalations stay until dismissed)
+            // Auto-dismiss warnings after 20 seconds (escalations remain until manually dismissed)
             if (nudge.event_type === 'qa.warning') {
               setTimeout(() => {
                 setNudges((current) => current.filter((item) => item.id !== nudge.id));
-              }, 18000);
+              }, 20000);
             }
           } catch (err) {
             console.debug('Failed to parse incoming WebSocket QA event:', err);
@@ -189,17 +178,27 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
   const handleIntervene = async (nudge: QANudgeEvent, mode: 'listen' | 'whisper' | 'barge') => {
     if (!token) return;
     const actionKey = `${nudge.id}-${mode}`;
-    setActionLoading(actionKey);
+    setActionStatus((prev) => ({ ...prev, [actionKey]: 'loading' }));
+
     try {
-      const res = await apiService.interveneQACall(token, nudge.call_uuid, mode);
-      toastSuccess(
-        `Intervention Dispatched (${mode.toUpperCase()})`,
-        `Connected to Agent ${nudge.agent_extension} via supervisor extension ${res.supervisor_extension || '9001'}.`
-      );
-    } catch (err: any) {
-      toastError('Intervention Failed', err.message || `Could not initiate ${mode} intervention`);
-    } finally {
-      setActionLoading(null);
+      await apiService.interveneQACall(token, nudge.call_uuid, mode);
+      setActionStatus((prev) => ({ ...prev, [actionKey]: 'success' }));
+      setTimeout(() => {
+        setActionStatus((prev) => {
+          const next = { ...prev };
+          delete next[actionKey];
+          return next;
+        });
+      }, 4000);
+    } catch {
+      setActionStatus((prev) => ({ ...prev, [actionKey]: 'error' }));
+      setTimeout(() => {
+        setActionStatus((prev) => {
+          const next = { ...prev };
+          delete next[actionKey];
+          return next;
+        });
+      }, 4000);
     }
   };
 
@@ -209,31 +208,36 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
     <div
       style={{
         position: 'fixed',
-        top: '76px',
+        top: '80px',
         right: '24px',
-        zIndex: 9999,
+        zIndex: 99999,
         display: 'flex',
         flexDirection: 'column',
         gap: '12px',
-        maxWidth: '460px',
+        maxWidth: '430px',
         width: 'calc(100vw - 48px)',
         pointerEvents: 'none',
       }}
     >
       {nudges.map((nudge) => {
         const isEscalation = nudge.event_type === 'qa.escalation';
+        const listenKey = `${nudge.id}-listen`;
+        const bargeKey = `${nudge.id}-barge`;
+        const listenStatus = actionStatus[listenKey];
+        const bargeStatus = actionStatus[bargeKey];
+
         return (
           <div
             key={nudge.id}
             style={{
               pointerEvents: 'auto',
-              background: isEscalation ? '#180B0D' : '#141416',
+              background: isEscalation ? '#17090B' : '#141416',
               border: isEscalation ? '1.5px solid #EF4444' : '1.5px solid #F59E0B',
               borderRadius: '14px',
               padding: '16px',
               boxShadow: isEscalation
-                ? '0 12px 32px rgba(239, 68, 68, 0.35), 0 2px 8px rgba(0,0,0,0.8)'
-                : '0 12px 32px rgba(245, 158, 11, 0.25), 0 2px 8px rgba(0,0,0,0.8)',
+                ? '0 16px 40px rgba(239, 68, 68, 0.4), 0 4px 12px rgba(0,0,0,0.85)'
+                : '0 16px 40px rgba(245, 158, 11, 0.28), 0 4px 12px rgba(0,0,0,0.85)',
               color: '#FFFFFF',
               fontFamily: 'system-ui, -apple-system, sans-serif',
               animation: 'slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
@@ -250,7 +254,7 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
                 right: 0,
                 height: '3px',
                 background: isEscalation
-                  ? 'linear-gradient(90deg, #EF4444, #DC2626)'
+                  ? 'linear-gradient(90deg, #EF4444, #B91C1C)'
                   : 'linear-gradient(90deg, #F59E0B, #D97706)',
               }}
             />
@@ -295,7 +299,7 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
                     <AlertTriangle size={13} /> COMPLIANCE NUDGE
                   </span>
                 )}
-                <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 500 }}>
+                <span style={{ fontSize: '12px', color: '#9CA3AF', fontWeight: 600 }}>
                   Warning {nudge.warn_count}/{nudge.max_warn_retries}
                 </span>
               </div>
@@ -312,7 +316,7 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
                   alignItems: 'center',
                   borderRadius: '4px',
                 }}
-                title="Dismiss nudge"
+                title="Dismiss"
               >
                 <X size={16} />
               </button>
@@ -327,7 +331,10 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
                 <span style={{ color: '#9CA3AF' }}>Customer: </span>
                 <strong style={{ color: '#F3F4F6' }}>Ext {nudge.customer_extension}</strong>
               </div>
-              <span style={{ fontSize: '11px', color: '#9CA3AF' }}>Live Call</span>
+              <span style={{ fontSize: '11px', color: '#10B981', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10B981' }} />
+                Live
+              </span>
             </div>
 
             {/* Violation Reason */}
@@ -339,7 +346,7 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
             {nudge.transcript && (
               <div
                 style={{
-                  background: 'rgba(0, 0, 0, 0.45)',
+                  background: 'rgba(0, 0, 0, 0.5)',
                   border: '1px solid rgba(255, 255, 255, 0.08)',
                   borderRadius: '8px',
                   padding: '8px 10px',
@@ -359,7 +366,7 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', fontSize: '11px', color: '#60A5FA', marginBottom: '12px' }}>
                 <Volume2 size={14} style={{ flexShrink: 0, marginTop: '1px' }} />
                 <span>
-                  <strong>Whispered to Agent:</strong> &ldquo;{nudge.whisper_text || nudge.coaching}&rdquo;
+                  <strong>Whispered:</strong> &ldquo;{nudge.whisper_text || nudge.coaching}&rdquo;
                 </span>
               </div>
             )}
@@ -368,47 +375,48 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <button
                 onClick={() => handleIntervene(nudge, 'listen')}
-                disabled={actionLoading === `${nudge.id}-listen`}
+                disabled={listenStatus === 'loading'}
                 style={{
-                  background: '#27272A',
+                  background: listenStatus === 'success' ? '#065F46' : '#27272A',
                   color: '#E4E4E7',
                   border: '1px solid #3F3F46',
                   borderRadius: '6px',
-                  padding: '6px 10px',
+                  padding: '6px 11px',
                   fontSize: '12px',
                   fontWeight: 600,
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '5px',
-                  transition: 'background 0.15s ease',
+                  transition: 'all 0.15s ease',
                 }}
                 title="Eavesdrop on call (*881 + agent extension)"
               >
-                <Headphones size={13} className="text-primary" />
-                {actionLoading === `${nudge.id}-listen` ? 'Connecting...' : `Listen (*881${nudge.agent_extension})`}
+                {listenStatus === 'success' ? <Check size={13} className="text-emerald-400" /> : <Headphones size={13} className="text-amber-400" />}
+                {listenStatus === 'loading' ? 'Connecting...' : listenStatus === 'success' ? 'Connected' : `Listen (*881${nudge.agent_extension})`}
               </button>
 
               <button
                 onClick={() => handleIntervene(nudge, 'barge')}
-                disabled={actionLoading === `${nudge.id}-barge`}
+                disabled={bargeStatus === 'loading'}
                 style={{
-                  background: isEscalation ? '#991B1B' : '#78350F',
+                  background: bargeStatus === 'success' ? '#065F46' : isEscalation ? '#991B1B' : '#78350F',
                   color: '#FFFFFF',
                   border: 'none',
                   borderRadius: '6px',
-                  padding: '6px 10px',
+                  padding: '6px 11px',
                   fontSize: '12px',
                   fontWeight: 600,
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '5px',
+                  transition: 'all 0.15s ease',
                 }}
                 title="Barge into call (*883 + agent extension)"
               >
-                <Radio size={13} />
-                {actionLoading === `${nudge.id}-barge` ? 'Barging...' : 'Barge In'}
+                {bargeStatus === 'success' ? <Check size={13} /> : <Radio size={13} />}
+                {bargeStatus === 'loading' ? 'Barging...' : bargeStatus === 'success' ? 'Barged In' : 'Barge In'}
               </button>
 
               {onNavigateToQA && (
