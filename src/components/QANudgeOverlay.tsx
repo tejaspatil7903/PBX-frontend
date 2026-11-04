@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { AlertTriangle, ShieldAlert, Headphones, Radio, X, ExternalLink, Volume2, Check } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, Headphones, Radio, X, ExternalLink, Volume2, Check, Mic, MicOff, PhoneOff } from 'lucide-react';
 import { apiService } from '../services/api';
+import { webrtcService, type WebRTCStateChange } from '../services/webrtcService';
 import type { User } from '../types';
 
 export interface QANudgeEvent {
@@ -72,7 +73,17 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
 }) => {
   const [nudges, setNudges] = useState<QANudgeEvent[]>([]);
   const [actionStatus, setActionStatus] = useState<{ [key: string]: 'loading' | 'success' | 'error' }>({});
+  const [webrtcState, setWebrtcState] = useState<WebRTCStateChange>({
+    state: 'idle',
+    isMuted: true,
+  });
   const wsRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    return webrtcService.subscribe((state) => {
+      setWebrtcState(state);
+    });
+  }, []);
 
   useEffect(() => {
     if (!token || !user) return;
@@ -199,24 +210,23 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
     setActionStatus((prev) => ({ ...prev, [actionKey]: 'loading' }));
 
     try {
-      await apiService.interveneQACall(token, nudge.call_uuid, mode);
+      // Connect In-Browser WebRTC audio directly to FreeSWITCH!
+      if (mode === 'listen') {
+        await webrtcService.listen(token, nudge.agent_extension);
+      } else if (mode === 'barge') {
+        await webrtcService.barge(token, nudge.agent_extension);
+      } else {
+        await apiService.interveneQACall(token, nudge.call_uuid, mode);
+      }
       setActionStatus((prev) => ({ ...prev, [actionKey]: 'success' }));
-      setTimeout(() => {
-        setActionStatus((prev) => {
-          const next = { ...prev };
-          delete next[actionKey];
-          return next;
-        });
-      }, 4000);
-    } catch {
-      setActionStatus((prev) => ({ ...prev, [actionKey]: 'error' }));
-      setTimeout(() => {
-        setActionStatus((prev) => {
-          const next = { ...prev };
-          delete next[actionKey];
-          return next;
-        });
-      }, 4000);
+    } catch (webrtcErr) {
+      console.warn('In-browser WebRTC audio connection error, trying PBX softphone originate:', webrtcErr);
+      try {
+        await apiService.interveneQACall(token, nudge.call_uuid, mode);
+        setActionStatus((prev) => ({ ...prev, [actionKey]: 'success' }));
+      } catch {
+        setActionStatus((prev) => ({ ...prev, [actionKey]: 'error' }));
+      }
     }
   };
 
@@ -389,53 +399,134 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
               </div>
             )}
 
-            {/* Action Buttons: 1-Click Supervisor Intervention */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              <button
-                onClick={() => handleIntervene(nudge, 'listen')}
-                disabled={listenStatus === 'loading'}
+            {/* In-Browser WebRTC Live Audio Banner */}
+            {webrtcState.agentExtension === nudge.agent_extension && (webrtcState.state === 'listening' || webrtcState.state === 'barging') && (
+              <div
                 style={{
-                  background: listenStatus === 'success' ? '#065F46' : '#27272A',
-                  color: '#E4E4E7',
-                  border: '1px solid #3F3F46',
-                  borderRadius: '6px',
-                  padding: '6px 11px',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
+                  background: webrtcState.state === 'barging' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                  border: webrtcState.state === 'barging' ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid rgba(16, 185, 129, 0.4)',
+                  borderRadius: '8px',
+                  padding: '8px 10px',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '5px',
-                  transition: 'all 0.15s ease',
+                  justifyContent: 'space-between',
+                  marginBottom: '10px',
                 }}
-                title="Listen silently to call (*880 + agent extension)"
               >
-                {listenStatus === 'success' ? <Check size={13} className="text-emerald-400" /> : <Headphones size={13} className="text-amber-400" />}
-                {listenStatus === 'loading' ? 'Connecting...' : listenStatus === 'success' ? 'Connected' : `Listen (*880${nudge.agent_extension})`}
-              </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {webrtcState.state === 'barging' ? (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#EF4444', fontWeight: 700, fontSize: '11px' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#EF4444', display: 'inline-block' }} />
+                      Microphone Live (Barged In)
+                    </span>
+                  ) : (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#10B981', fontWeight: 700, fontSize: '11px' }}>
+                      <Headphones size={13} className="text-emerald-400" />
+                      Audio Playing in Browser
+                    </span>
+                  )}
+                </div>
 
-              <button
-                onClick={() => handleIntervene(nudge, 'barge')}
-                disabled={bargeStatus === 'loading'}
-                style={{
-                  background: bargeStatus === 'success' ? '#065F46' : isEscalation ? '#991B1B' : '#78350F',
-                  color: '#FFFFFF',
-                  border: 'none',
-                  borderRadius: '6px',
-                  padding: '6px 11px',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  transition: 'all 0.15s ease',
-                }}
-                title="Barge into call (*883 + agent extension)"
-              >
-                {bargeStatus === 'success' ? <Check size={13} /> : <Radio size={13} />}
-                {bargeStatus === 'loading' ? 'Barging...' : bargeStatus === 'success' ? 'Barged In' : `Barge In (*883${nudge.agent_extension})`}
-              </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button
+                    onClick={() => webrtcService.toggleMute()}
+                    style={{
+                      background: webrtcState.state === 'barging' ? '#374151' : '#991B1B',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      borderRadius: '5px',
+                      padding: '4px 8px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
+                    title={webrtcState.state === 'barging' ? 'Mute microphone (Listen Only)' : 'Unmute microphone (Barge In)'}
+                  >
+                    {webrtcState.state === 'barging' ? <MicOff size={12} /> : <Mic size={12} />}
+                    {webrtcState.state === 'barging' ? 'Mute Mic' : 'Barge In'}
+                  </button>
+
+                  <button
+                    onClick={() => webrtcService.hangup()}
+                    style={{
+                      background: '#1F2937',
+                      color: '#9CA3AF',
+                      border: '1px solid #374151',
+                      borderRadius: '5px',
+                      padding: '4px 8px',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '3px',
+                    }}
+                    title="Stop in-browser listening"
+                  >
+                    <PhoneOff size={12} />
+                    Leave
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Action Buttons: In-Browser WebRTC Listen & Barge */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {!(webrtcState.agentExtension === nudge.agent_extension && (webrtcState.state === 'listening' || webrtcState.state === 'barging')) && (
+                <>
+                  <button
+                    onClick={() => handleIntervene(nudge, 'listen')}
+                    disabled={listenStatus === 'loading' || webrtcState.state === 'connecting'}
+                    style={{
+                      background: listenStatus === 'success' ? '#065F46' : '#27272A',
+                      color: '#E4E4E7',
+                      border: '1px solid #3F3F46',
+                      borderRadius: '6px',
+                      padding: '6px 11px',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      transition: 'all 0.15s ease',
+                    }}
+                    title="Listen live inside browser (*880)"
+                  >
+                    {listenStatus === 'success' ? <Check size={13} className="text-emerald-400" /> : <Headphones size={13} className="text-amber-400" />}
+                    {listenStatus === 'loading' || (webrtcState.state === 'connecting' && webrtcState.agentExtension === nudge.agent_extension)
+                      ? 'Connecting Audio...'
+                      : listenStatus === 'success'
+                      ? 'Connected'
+                      : `Listen (*880${nudge.agent_extension})`}
+                  </button>
+
+                  <button
+                    onClick={() => handleIntervene(nudge, 'barge')}
+                    disabled={bargeStatus === 'loading' || webrtcState.state === 'connecting'}
+                    style={{
+                      background: bargeStatus === 'success' ? '#065F46' : isEscalation ? '#991B1B' : '#78350F',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      borderRadius: '6px',
+                      padding: '6px 11px',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      transition: 'all 0.15s ease',
+                    }}
+                    title="Barge into call with your browser microphone (*883)"
+                  >
+                    {bargeStatus === 'success' ? <Check size={13} /> : <Radio size={13} />}
+                    {bargeStatus === 'loading' ? 'Barging...' : bargeStatus === 'success' ? 'Barged In' : `Barge In (*883${nudge.agent_extension})`}
+                  </button>
+                </>
+              )}
 
               {onNavigateToQA && (
                 <button

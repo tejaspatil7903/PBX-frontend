@@ -1196,6 +1196,17 @@ export const apiService = {
     return res.json();
   },
 
+  async getQAWebRTCCredentials(token: string) {
+    const res = await fetch(`${API_BASE_URL}/api/v1/qa/webrtc-credentials`, {
+      headers: getHeaders(token),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to fetch WebRTC credentials');
+    }
+    return res.json();
+  },
+
   async startQADemoCall(token: string, payload?: { tenant_id?: string; agent_extension?: string; customer_extension?: string }) {
     const res = await fetch(`${API_BASE_URL}/api/v1/qa/calls/start-demo`, {
       method: 'POST',
