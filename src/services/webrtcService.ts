@@ -84,19 +84,22 @@ class QAWebRTCService {
       this.simpleUser = null;
     }
 
+    // Check for Secure Context upfront to provide clear, actionable error
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      throw new Error(
+        "Media devices not available in insecure context. Please enable the Chrome flag (chrome://flags/#unsafely-treat-insecure-origin-as-secure) or open via http://localhost:5173."
+      );
+    }
+
     const creds = await apiService.getQAWebRTCCredentials(token);
     const audioEl = this.ensureAudioElement();
 
-    // Determine WebSocket server URL
-    // If frontend is accessed via HTTPS or WSS proxy is available, use /wss or /ws-sip
+    // Determine WebSocket server URL using the proxied /ws-sip or /wss endpoint on current host
     const isHttps = window.location.protocol === 'https:';
-    let wsServer = creds.ws_server;
-    if (isHttps) {
-      wsServer = `wss://${window.location.host}/wss`;
-    } else {
-      // Use direct WS on port 5066 or /ws-sip proxy
-      wsServer = `ws://${window.location.hostname}:5066`;
-    }
+    const protocol = isHttps ? 'wss:' : 'ws:';
+    const wsServer = isHttps 
+      ? `wss://${window.location.host}/wss`
+      : `${protocol}//${window.location.host}/ws-sip`;
 
     const simpleUserOptions: Web.SimpleUserOptions = {
       aor: `sip:${creds.extension}@${creds.sip_domain}`,

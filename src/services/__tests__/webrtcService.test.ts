@@ -46,6 +46,16 @@ describe('QAWebRTCService Unit Tests', () => {
     // Mock HTMLAudioElement
     globalThis.HTMLMediaElement.prototype.play = vi.fn().mockResolvedValue(undefined);
     globalThis.HTMLMediaElement.prototype.pause = vi.fn();
+
+    // Mock Secure Context and mediaDevices for jsdom
+    Object.defineProperty(window, 'isSecureContext', { value: true, writable: true });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: {
+        getUserMedia: vi.fn().mockResolvedValue({}),
+      },
+      writable: true,
+      configurable: true,
+    });
   });
 
   it('provides initial idle state to subscribers', () => {

@@ -41,6 +41,19 @@ export default defineConfig({
           });
         },
       },
+      '/ws-sip': {
+        target: 'ws://127.0.0.1:5066',
+        ws: true,
+        changeOrigin: true,
+        configure: (proxy, _options) => {
+          (proxy as any).on('error', (err: any) => {
+            if (['ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ECONNREFUSED'].includes(err?.code)) {
+              return;
+            }
+            console.warn('[vite ws-sip proxy error]', err);
+          });
+        },
+      },
     },
   },
 })

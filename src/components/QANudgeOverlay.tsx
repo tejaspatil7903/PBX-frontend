@@ -28,38 +28,35 @@ interface QANudgeOverlayProps {
 }
 
 // ── Web Audio Synthesized Chime ──────────────────────────────────────────────
+// Subtle, professional, non-abrasive notification chime
 const playNudgeChime = (isEscalation: boolean) => {
   try {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioCtx) return;
     const ctx = new AudioCtx();
 
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine'; // Clean, pure sine wave tone (no harsh sawtooth chirping)
+
     if (isEscalation) {
-      // Urgent, attention-demanding escalation double-tone
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
-      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.15);
-      gain.gain.setValueAtTime(0.25, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.45);
+      // Urgent, professional escalation alert (two-tone: 600Hz -> 800Hz)
+      osc.frequency.setValueAtTime(600, ctx.currentTime);
+      osc.frequency.setValueAtTime(800, ctx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
       osc.start();
-      osc.stop(ctx.currentTime + 0.45);
+      osc.stop(ctx.currentTime + 0.4);
     } else {
-      // Soft, professional two-tone compliance chime
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(523.25, ctx.currentTime);
-      osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.12);
-      gain.gain.setValueAtTime(0.2, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
+      // Soft, gentle compliance chime (520Hz -> 660Hz)
+      osc.frequency.setValueAtTime(520, ctx.currentTime);
+      osc.frequency.setValueAtTime(660, ctx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
       osc.start();
-      osc.stop(ctx.currentTime + 0.35);
+      osc.stop(ctx.currentTime + 0.3);
     }
   } catch {
     // AudioContext might be silenced if user hasn't clicked on the document yet
@@ -73,11 +70,13 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
 }) => {
   const [nudges, setNudges] = useState<QANudgeEvent[]>([]);
   const [actionStatus, setActionStatus] = useState<{ [key: string]: 'loading' | 'success' | 'error' }>({});
+  const [errorNotice, setErrorNotice] = useState<{ [callId: string]: string }>({});
   const [webrtcState, setWebrtcState] = useState<WebRTCStateChange>({
     state: 'idle',
     isMuted: true,
   });
   const wsRef = useRef<WebSocket | null>(null);
+  const chimedCallsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     return webrtcService.subscribe((state) => {
@@ -118,13 +117,25 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
           try {
             if (event.data === 'pong') return;
             const payload = JSON.parse(event.data);
+
+            // ── Call Termination / Hangup Event Handler ─────────────────
+            // When call ends, automatically remove nudge popup & hang up WebRTC!
+            const isCallEnded = payload.event_type === 'qa.call_ended' || payload.event === 'cdr.created';
+            if (isCallEnded) {
+              const endedUuid = payload.call_uuid || payload.data?.call_uuid;
+              if (endedUuid) {
+                setNudges((prev) => prev.filter((n) => n.call_uuid !== endedUuid && n.id !== endedUuid));
+                // Hang up in-browser WebRTC if active
+                webrtcService.hangup();
+              }
+              return;
+            }
+
             if (payload.event_type !== 'qa.warning' && payload.event_type !== 'qa.escalation') {
               return;
             }
 
             // ── Strict Tenant Isolation Guard ──────────────────────────────
-            // If user is a Tenant Admin or Supervisor, they MUST ONLY see
-            // events belonging to their exact tenant_id!
             if (userRole !== 'SUPER_ADMIN') {
               const userTid = String(user.tenant_id || '');
               const eventTid = String(payload.tenant_id || '');
@@ -134,8 +145,8 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
             }
 
             // ── Final Warning & Escalation Filter ─────────────────────────
-            // Early warnings (e.g. 1/3, 2/3) only whisper to the agent softphone.
-            // The tenant admin is only nudged on the FINAL warning or escalation!
+            // Early warnings (1/3, 2/3) only whisper to agent softphone.
+            // Tenant admin is nudged ONLY on FINAL warning or escalation!
             const isEscalation = payload.event_type === 'qa.escalation';
             const warnCount = Number(payload.warn_count || 1);
             const maxRetries = Number(payload.max_warn_retries || 3);
@@ -147,7 +158,7 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
 
             const callUuid = payload.call_uuid || String(Date.now());
             const nudge: QANudgeEvent = {
-              id: callUuid, // Keyed by call_uuid so warnings update in-place without stacking duplicate cards!
+              id: callUuid,
               event_type: payload.event_type,
               call_uuid: callUuid,
               tenant_id: payload.tenant_id,
@@ -163,10 +174,14 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
               timestamp: payload.timestamp || Date.now()
             };
 
-            // Play auditory chime
-            playNudgeChime(isEscalation);
+            // Play chime ONCE per call stage (never repeatedly on every transcript chunk)
+            const chimeKey = `${callUuid}-${isEscalation ? 'esc' : 'warn'}`;
+            if (!chimedCallsRef.current.has(chimeKey)) {
+              chimedCallsRef.current.add(chimeKey);
+              playNudgeChime(isEscalation);
+            }
 
-            // Update in-place if card for this call already exists, otherwise add to top (max 2 calls)
+            // Update in-place if card for this call already exists, otherwise add to top
             setNudges((prev) => {
               const remaining = prev.filter((n) => n.id !== nudge.id);
               return [nudge, ...remaining].slice(0, 2);
@@ -202,6 +217,11 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
 
   const handleDismiss = (id: string) => {
     setNudges((prev) => prev.filter((n) => n.id !== id));
+    setErrorNotice((prev) => {
+      const copy = { ...prev };
+      delete copy[id];
+      return copy;
+    });
   };
 
   const handleIntervene = async (nudge: QANudgeEvent, mode: 'listen' | 'whisper' | 'barge') => {
@@ -210,7 +230,6 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
     setActionStatus((prev) => ({ ...prev, [actionKey]: 'loading' }));
 
     try {
-      // Connect In-Browser WebRTC audio directly to FreeSWITCH!
       if (mode === 'listen') {
         await webrtcService.listen(token, nudge.agent_extension);
       } else if (mode === 'barge') {
@@ -219,14 +238,42 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
         await apiService.interveneQACall(token, nudge.call_uuid, mode);
       }
       setActionStatus((prev) => ({ ...prev, [actionKey]: 'success' }));
-    } catch (webrtcErr) {
-      console.warn('In-browser WebRTC audio connection error, trying PBX softphone originate:', webrtcErr);
-      try {
-        await apiService.interveneQACall(token, nudge.call_uuid, mode);
-        setActionStatus((prev) => ({ ...prev, [actionKey]: 'success' }));
-      } catch {
-        setActionStatus((prev) => ({ ...prev, [actionKey]: 'error' }));
+      setErrorNotice((prev) => {
+        const copy = { ...prev };
+        delete copy[nudge.id];
+        return copy;
+      });
+    } catch (webrtcErr: any) {
+      console.warn('In-browser WebRTC audio connection error:', webrtcErr);
+      setActionStatus((prev) => ({ ...prev, [actionKey]: 'error' }));
+
+      const isContextError = !window.isSecureContext ||
+        webrtcErr?.message?.toLowerCase().includes('insecure context') ||
+        webrtcErr?.message?.toLowerCase().includes('media devices not available');
+
+      if (isContextError) {
+        setErrorNotice((prev) => ({
+          ...prev,
+          [nudge.id]: 'Chrome blocks browser microphone/audio on insecure HTTP. Please open chrome://flags/#unsafely-treat-insecure-origin-as-secure, add http://35.244.8.204:5173, enable & relaunch Chrome.'
+        }));
+      } else {
+        setErrorNotice((prev) => ({
+          ...prev,
+          [nudge.id]: webrtcErr?.message || 'Audio connection error. Check console for details.'
+        }));
       }
+    }
+  };
+
+  const handlePhoneOriginate = async (nudge: QANudgeEvent, mode: 'listen' | 'whisper' | 'barge') => {
+    if (!token) return;
+    const actionKey = `${nudge.id}-phone-${mode}`;
+    setActionStatus((prev) => ({ ...prev, [actionKey]: 'loading' }));
+    try {
+      await apiService.interveneQACall(token, nudge.call_uuid, mode);
+      setActionStatus((prev) => ({ ...prev, [actionKey]: 'success' }));
+    } catch {
+      setActionStatus((prev) => ({ ...prev, [actionKey]: 'error' }));
     }
   };
 
@@ -467,6 +514,43 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
                   >
                     <PhoneOff size={12} />
                     Leave
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Error Notice Banner if WebRTC or Insecure Context fails */}
+            {errorNotice[nudge.id] && (
+              <div
+                style={{
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  borderRadius: '6px',
+                  padding: '8px 10px',
+                  marginBottom: '10px',
+                  fontSize: '11px',
+                  color: '#FCA5A5',
+                  lineHeight: '1.4',
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: '4px' }}>⚠️ In-Browser Audio Notice</div>
+                <div>{errorNotice[nudge.id]}</div>
+                <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ color: '#9CA3AF' }}>Or fallback:</span>
+                  <button
+                    onClick={() => handlePhoneOriginate(nudge, 'listen')}
+                    disabled={actionStatus[`${nudge.id}-phone-listen`] === 'loading'}
+                    style={{
+                      background: '#374151',
+                      border: '1px solid #4B5563',
+                      color: '#E5E7EB',
+                      padding: '3px 8px',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {actionStatus[`${nudge.id}-phone-listen`] === 'loading' ? 'Ringing...' : `Ring Softphone (*880${nudge.agent_extension})`}
                   </button>
                 </div>
               </div>
