@@ -87,14 +87,25 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
     const wsUrl = `${protocol}//${window.location.host}/ws/events?token=${encodeURIComponent(token)}`;
 
     let reconnectTimer: any = null;
+    let pingInterval: any = null;
 
     const connectWebSocket = () => {
       try {
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
+        ws.onopen = () => {
+          if (pingInterval) clearInterval(pingInterval);
+          pingInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send('ping');
+            }
+          }, 20000);
+        };
+
         ws.onmessage = (event) => {
           try {
+            if (event.data === 'pong') return;
             const payload = JSON.parse(event.data);
             if (payload.event_type !== 'qa.warning' && payload.event_type !== 'qa.escalation') {
               return;
@@ -155,6 +166,7 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
         };
 
         ws.onclose = () => {
+          if (pingInterval) clearInterval(pingInterval);
           reconnectTimer = setTimeout(connectWebSocket, 4000);
         };
 
@@ -169,6 +181,7 @@ export const QANudgeOverlay: React.FC<QANudgeOverlayProps> = ({
     connectWebSocket();
 
     return () => {
+      if (pingInterval) clearInterval(pingInterval);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (wsRef.current) {
         try { wsRef.current.close(); } catch {}

@@ -109,10 +109,20 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token, user }) => 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/events?token=${encodeURIComponent(token)}`;
     let ws: WebSocket | null = null;
+    let pingInterval: any = null;
+
     try {
       ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        pingInterval = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send('ping');
+          }
+        }, 20000);
+      };
       ws.onmessage = (msg) => {
         try {
+          if (msg.data === 'pong') return;
           const payload = JSON.parse(msg.data);
           if (payload.event_type === 'qa.warning' || payload.event_type === 'qa.escalation') {
             apiService.getQAActiveCalls(token, selectedTenantId || undefined).then(setActiveCalls).catch(() => {});
@@ -121,7 +131,9 @@ export const VirtualQAView: React.FC<VirtualQAViewProps> = ({ token, user }) => 
         } catch {}
       };
     } catch {}
+
     return () => {
+      if (pingInterval) clearInterval(pingInterval);
       if (ws) ws.close();
     };
   }, [token, selectedTenantId]);

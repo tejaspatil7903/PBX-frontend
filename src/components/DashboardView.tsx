@@ -131,10 +131,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ token, user, setAc
     const wsUrl = `${protocol}//${window.location.host}/ws/reports?token=${encodeURIComponent(token)}`;
     let ws: WebSocket | null = null;
     let reconnectTimer: any = null;
+    let pingInterval: any = null;
 
     const connectWs = () => {
       try {
         ws = new WebSocket(wsUrl);
+        ws.onopen = () => {
+          if (pingInterval) clearInterval(pingInterval);
+          pingInterval = setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send('ping');
+            }
+          }, 20000);
+        };
         ws.onmessage = (event) => {
           try {
             if (event.data === 'pong') return;
@@ -154,6 +163,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ token, user, setAc
           } catch {}
         };
         ws.onclose = () => {
+          if (pingInterval) clearInterval(pingInterval);
           reconnectTimer = setTimeout(connectWs, 5000);
         };
       } catch {}
@@ -162,6 +172,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ token, user, setAc
     connectWs();
 
     return () => {
+      if (pingInterval) clearInterval(pingInterval);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (ws) ws.close();
     };

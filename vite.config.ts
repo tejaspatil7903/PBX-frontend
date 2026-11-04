@@ -11,20 +11,35 @@ export default defineConfig({
     allowedHosts: ['pbx.terrixai.com', '.terrixai.com', 'localhost', '35.244.8.204'],
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
       '/health': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
       '/ready': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:8000',
+        target: 'ws://127.0.0.1:8000',
         ws: true,
+        changeOrigin: true,
+        configure: (proxy, _options) => {
+          (proxy as any).on('error', (err: any) => {
+            if (['ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ECONNREFUSED'].includes(err?.code)) {
+              return;
+            }
+            console.warn('[vite ws proxy error]', err);
+          });
+          (proxy as any).on('proxyReqWsError', (err: any) => {
+            if (['ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ECONNREFUSED'].includes(err?.code)) {
+              return;
+            }
+            console.warn('[vite ws proxy socket error]', err);
+          });
+        },
       },
     },
   },
